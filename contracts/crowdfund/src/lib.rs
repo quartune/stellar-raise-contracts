@@ -200,7 +200,9 @@ impl CrowdfundContract {
         }
 
         env.storage().instance().set(&DataKey::Goal, &goal);
-        env.storage().instance().set(&DataKey::HardCap, &hard_cap_value);
+        env.storage()
+            .instance()
+            .set(&DataKey::HardCap, &hard_cap_value);
         env.storage().instance().set(&DataKey::Deadline, &deadline);
         env.storage()
             .instance()
@@ -218,7 +220,9 @@ impl CrowdfundContract {
 
         // Store platform config if provided.
         if let Some(config) = platform_config {
-            env.storage().instance().set(&DataKey::PlatformConfig, &config);
+            env.storage()
+                .instance()
+                .set(&DataKey::PlatformConfig, &config);
         }
 
         let empty_contributors: Vec<Address> = Vec::new(&env);

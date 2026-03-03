@@ -6,28 +6,7 @@ use soroban_sdk::{
     token, Address, Env, Vec,
 };
 
-#[contract]
-struct MockNftContract;
-
-#[contractimpl]
-impl MockNftContract {
-    pub fn mint(env: Env, to: Address) -> u128 {
-        let next_id: u128 = env.storage().instance().get(&1u32).unwrap_or(0u128) + 1;
-        env.storage().instance().set(&1u32, &next_id);
-
-        let mut records: Vec<MintRecord> = env
-            .storage()
-            .persistent()
-            .get(&2u32)
-            .unwrap_or_else(|| Vec::new(&env));
-        records.push_back(MintRecord {
-            to,
-            token_id: next_id,
-        });
-        env.storage().persistent().set(&2u32, &records);
-
-        next_id
-    }
+use crate::{CrowdfundContract, CrowdfundContractClient};
 
 #[derive(Clone)]
 #[contracttype]
@@ -67,6 +46,7 @@ impl MockNftContract {
     }
 }
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn setup_env() -> (
@@ -125,15 +105,6 @@ fn test_withdraw_mints_nft_for_each_contributor() {
     assert_eq!(client.deadline(), deadline);
     assert_eq!(client.min_contribution(), min_contribution);
     assert_eq!(client.total_raised(), 0);
-}
-
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    token_admin_client.mint(&alice, &600_000);
-    token_admin_client.mint(&bob, &400_000);
-
-    // Test that version() returns the expected version number
-    assert_eq!(client.version(), 1);
 }
 
 #[test]
@@ -232,7 +203,7 @@ fn test_set_nft_contract_rejects_non_creator() {
 
 #[test]
 fn test_contribute_after_deadline_panics() {
-    let (env, client, platform_admin, creator, token_address, token_admin) = setup_env();
+    let (env, client, creator, token_address, token_admin) = setup_env();
 
     let deadline = env.ledger().timestamp() + 100;
     let goal: i128 = 1_000_000;
@@ -334,7 +305,7 @@ fn test_contribute_after_deadline_returns_error() {
 
 #[test]
 fn test_withdraw_goal_not_reached_panics() {
-    let (env, client, platform_admin, creator, token_address, token_admin) = setup_env();
+    let (env, client, creator, token_address, token_admin) = setup_env();
 
     let deadline = env.ledger().timestamp() + 3600;
     let goal: i128 = 1_000_000;
@@ -880,7 +851,7 @@ proptest! {
 #[test]
 #[should_panic(expected = "campaign is not active")]
 fn test_double_withdraw_panics() {
-    let (env, client, platform_admin, creator, token_address, token_admin) = setup_env();
+    let (env, client, creator, token_address, token_admin) = setup_env();
 
     let deadline = env.ledger().timestamp() + 3600;
     let goal: i128 = 1_000_000;
@@ -937,7 +908,7 @@ fn test_double_refund_panics() {
 
 #[test]
 fn test_cancel_with_no_contributions() {
-    let (env, client, platform_admin, creator, token_address, _token_admin) = setup_env();
+    let (env, client, creator, token_address, _token_admin) = setup_env();
 
     let deadline = env.ledger().timestamp() + 3600;
     let goal: i128 = 1_000_000;
@@ -953,49 +924,10 @@ fn test_cancel_with_no_contributions() {
         &None,
     );
 
-proptest! {
-    #[test]
-    fn prop_preservation_first_initialization(
-        goal in 1_000i128..10_000_000i128,
-        deadline_offset in 100u64..10_000u64,
-    ) {
-        let (env, client, creator, token_address, _admin) = setup_env();
-        let deadline = env.ledger().timestamp() + deadline_offset;
+    client.cancel();
 
-        // Test 3.1: First initialization stores all values correctly
-        client.initialize(&creator, &token_address, &goal, &deadline, &1_000, &default_title(&env), &default_description(&env), &None);
-
-        prop_assert_eq!(client.goal(), goal);
-        prop_assert_eq!(client.deadline(), deadline);
-        prop_assert_eq!(client.total_raised(), 0);
-    }
-
-    let deadline = env.ledger().timestamp() + 3600;
-    let goal: i128 = 1_000_000;
-    let min_contribution: i128 = 1_000;
-    client.initialize(
-        &creator,
-        &token_address,
-        &goal,
-        &deadline,
-        &min_contribution,
-        &None,
-        &None,
-        &None,
-    );
-
-        client.initialize(&creator, &token_address, &goal, &deadline, &1_000, &default_title(&env), &default_description(&env), &None);
-
-    client.contribute(&alice, &300_000, &None);
-    client.contribute(&bob, &200_000, &None);
-
-        // Test 3.2: Valid contribution before deadline works correctly
-        client.contribute(&contributor, &contribution_amount);
-
-        prop_assert_eq!(client.total_raised(), contribution_amount);
-        prop_assert_eq!(client.contribution(&contributor), contribution_amount);
-    }
-
+    assert_eq!(client.total_raised(), 0);
+}
 #[test]
 #[should_panic]
 fn test_cancel_by_non_creator_panics() {
@@ -2219,7 +2151,14 @@ fn test_auto_extension_triggered() {
     let min_contribution: i128 = 1_000;
     let auto_extension_threshold: i128 = 100_000;
 
-    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &Some(auto_extension_threshold),
+    );
 
     // Move to within the auto-extension window (last hour).
     env.ledger().set_timestamp(deadline - 1800); // 30 minutes before deadline
@@ -2242,7 +2181,14 @@ fn test_auto_extension_not_triggered_below_threshold() {
     let min_contribution: i128 = 1_000;
     let auto_extension_threshold: i128 = 100_000;
 
-    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &Some(auto_extension_threshold),
+    );
 
     // Move to within the auto-extension window.
     env.ledger().set_timestamp(deadline - 1800);
@@ -2264,7 +2210,14 @@ fn test_auto_extension_not_triggered_outside_window() {
     let min_contribution: i128 = 1_000;
     let auto_extension_threshold: i128 = 100_000;
 
-    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &Some(auto_extension_threshold),
+    );
 
     // Contribute outside the auto-extension window (more than 1 hour before deadline).
     env.ledger().set_timestamp(deadline - 5000);
@@ -2286,7 +2239,14 @@ fn test_auto_extension_cap_prevents_infinite_extension() {
     let min_contribution: i128 = 1_000;
     let auto_extension_threshold: i128 = 100_000;
 
-    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &Some(auto_extension_threshold),
+    );
 
     // Trigger 5 extensions (the maximum).
     for _i in 0..5 {
@@ -2321,7 +2281,14 @@ fn test_auto_extension_disabled_when_not_configured() {
     let goal: i128 = 1_000_000;
     let min_contribution: i128 = 1_000;
 
-    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &None);
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+    );
 
     // Move to within the auto-extension window.
     env.ledger().set_timestamp(deadline - 1800);

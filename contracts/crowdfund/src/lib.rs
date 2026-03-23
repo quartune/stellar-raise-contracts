@@ -10,6 +10,10 @@ use soroban_sdk::{
 #[cfg(test)]
 mod auth_tests;
 #[cfg(test)]
+mod proptest_generator_boundary;
+#[cfg(test)]
+mod proptest_generator_boundary_tests;
+#[cfg(test)]
 mod test;
 
 const CONTRACT_VERSION: u32 = 3;

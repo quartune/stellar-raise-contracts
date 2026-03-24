@@ -14,6 +14,7 @@ Thumbs.db
 # Soroban
 *.d
 .kiro/
+.soroban/
 
 contracts/*/test_snapshots/
 node_modules

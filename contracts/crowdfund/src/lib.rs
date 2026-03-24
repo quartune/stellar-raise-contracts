@@ -27,6 +27,11 @@ const CONTRACT_VERSION: u32 = 3;
 #[allow(dead_code)]
 const CONTRIBUTION_COOLDOWN: u64 = 60; // 60 seconds cooldown
 
+/// Maximum number of NFT mint calls (and their events) emitted in a single
+/// `withdraw()` invocation.  Caps per-contributor event emission to prevent
+/// unbounded gas consumption when the contributor list is large.
+pub const MAX_NFT_MINT_BATCH: u32 = 50;
+
 // ── Data Types ──────────────────────────────────────────────────────────────
 
 /// Represents the campaign status.
@@ -513,47 +518,58 @@ impl CrowdfundContract {
             .instance()
             .set(&DataKey::Status, &Status::Successful);
 
-        if let Some(nft_contract) = env
-            .storage()
-            .instance()
-            .get::<_, Address>(&DataKey::NFTContract)
-        {
-            let contributors: Vec<Address> = env
+        // Bounded NFT minting: process at most MAX_NFT_MINT_BATCH contributors
+        // per withdraw() call to cap event emission and gas consumption.
+        let nft_minted_count: u32 =
+            if let Some(nft_contract) = env
                 .storage()
-                .persistent()
-                .get(&DataKey::Contributors)
-                .unwrap_or_else(|| Vec::new(&env));
-            let mut token_id: u64 = 1;
-            for contributor in contributors.iter() {
-                let contribution: i128 = env
+                .instance()
+                .get::<_, Address>(&DataKey::NFTContract)
+            {
+                let contributors: Vec<Address> = env
                     .storage()
                     .persistent()
-                    .get(&DataKey::Contribution(contributor.clone()))
-                    .unwrap_or(0);
-                if contribution > 0 {
-                    env.invoke_contract::<()>(
-                        &nft_contract,
-                        &Symbol::new(&env, "mint"),
-                        Vec::from_array(
-                            &env,
-                            [contributor.into_val(&env), token_id.into_val(&env)],
-                        ),
-                    );
-                    env.events().publish(
-                        (
-                            Symbol::new(&env, "campaign"),
-                            Symbol::new(&env, "nft_minted"),
-                        ),
-                        (contributor.clone(), token_id),
-                    );
-                    token_id += 1;
+                    .get(&DataKey::Contributors)
+                    .unwrap_or_else(|| Vec::new(&env));
+                let mut token_id: u64 = 1;
+                let mut minted: u32 = 0;
+                for contributor in contributors.iter() {
+                    if minted >= MAX_NFT_MINT_BATCH {
+                        break;
+                    }
+                    let contribution: i128 = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::Contribution(contributor.clone()))
+                        .unwrap_or(0);
+                    if contribution > 0 {
+                        env.invoke_contract::<()>(
+                            &nft_contract,
+                            &Symbol::new(&env, "mint"),
+                            Vec::from_array(
+                                &env,
+                                [contributor.into_val(&env), token_id.into_val(&env)],
+                            ),
+                        );
+                        token_id += 1;
+                        minted += 1;
+                    }
                 }
-            }
-        }
+                // Single summary event instead of one event per contributor.
+                if minted > 0 {
+                    env.events()
+                        .publish(("campaign", "nft_batch_minted"), minted);
+                }
+                minted
+            } else {
+                0
+            };
 
-        // Emit withdrawal event
-        env.events()
-            .publish(("campaign", "withdrawn"), (creator.clone(), total));
+        // Single withdrawal event carrying payout, fee info, and mint count.
+        env.events().publish(
+            ("campaign", "withdrawn"),
+            (creator.clone(), creator_payout, nft_minted_count),
+        );
 
         Ok(())
     }

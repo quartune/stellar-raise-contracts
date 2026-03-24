@@ -12,12 +12,14 @@ impl SorobanSdkMinor {
     /// @param admin The administrator address.
     pub fn init(env: Env, admin: Address) {
         admin.require_auth();
-        env.storage().instance().set(&String::from_str(&env, "admin"), &admin);
+        env.storage()
+            .instance()
+            .set(&String::from_str(&env, "admin"), &admin);
     }
 
     /// @notice Demonstrates v22 Address handling and cross-contract call patterns.
     /// @dev In v22, Address objects are more robust and require_auth is the preferred pattern for authorization.
-    pub fn check_auth(env: Env, user: Address) -> bool {
+    pub fn check_auth(_env: Env, user: Address) -> bool {
         // NatSpec: require_auth() verifies that the 'user' has authorized this call.
         // This is a core pattern in the Soroban security model.
         user.require_auth();

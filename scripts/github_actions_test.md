@@ -78,8 +78,8 @@ updated all `soroban` command invocations to `stellar`.
 
 | Script | Purpose |
 |---|---|
-| `scripts/github_actions_test.sh` | Validates workflow files in CI or locally (7 checks) |
-| `scripts/github_actions_test.test.sh` | Tests the validator against pass/fail scenarios (8 tests) |
+| `scripts/github_actions_test.sh` | Validates workflow files in CI or locally (11 checks) |
+| `scripts/github_actions_test.test.sh` | Tests the validator against pass/fail scenarios (11 tests) |
 
 Run locally:
 
@@ -88,6 +88,21 @@ bash scripts/github_actions_test.sh
 bash scripts/github_actions_test.test.sh
 ```
 
+## Logging bounds added to `rust_ci.yml`
+
+Three changes improve observability and prevent runaway builds:
+
+| What | Where | Value |
+|---|---|---|
+| Job hard timeout | `jobs.check.timeout-minutes` | 30 min |
+| WASM build step timeout | `Build crowdfund WASM for tests` step | 10 min |
+| Test step timeout | `Run tests` step | 15 min |
+| Elapsed-time log | `Log total job elapsed time` step (always runs) | soft warn at 20 min |
+
+The elapsed-time step runs with `if: always()` so it fires even on failure,
+giving a timing signal for slow or hung jobs. It emits a `::warning::` annotation
+if the job exceeds the 20-minute soft target without failing the build.
+
 ## Security notes
 
 - No secrets or credentials are introduced or modified.
@@ -95,3 +110,5 @@ bash scripts/github_actions_test.test.sh
 - The spellcheck action runs with default (read-only) permissions.
 - Using `stellar-cli` (the maintained successor) reduces supply-chain risk
   compared to the deprecated `soroban-cli` package.
+- `timeout-minutes` bounds prevent a compromised or infinite-looping dependency
+  from holding a runner indefinitely.

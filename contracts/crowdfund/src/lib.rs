@@ -13,6 +13,10 @@ pub mod cargo_toml_rust;
 #[path = "cargo_toml_rust.test.rs"]
 mod cargo_toml_rust_test;
 
+pub mod withdraw_event_emission;
+#[cfg(test)]
+mod withdraw_event_emission_test;
+
 pub mod contract_state_size;
 #[cfg(test)]
 mod contract_state_size_test;
@@ -358,7 +362,7 @@ impl CrowdfundContract {
         if is_new_contributor {
             if let Err(err) = contract_state_size::validate_contributor_capacity(contributors.len())
             {
-                panic!("{}", err);
+                panic!("state size limit exceeded");
             }
         }
 
@@ -484,7 +488,7 @@ impl CrowdfundContract {
         let is_new_pledger = !pledgers.contains(&pledger);
         if is_new_pledger {
             if let Err(err) = contract_state_size::validate_pledger_capacity(pledgers.len()) {
-                panic!("{}", err);
+                panic!("state size limit exceeded");
             }
         }
 
@@ -675,8 +679,7 @@ impl CrowdfundContract {
                 .expect("fee division by zero");
 
             token_client.transfer(&env.current_contract_address(), &config.address, &fee);
-            env.events()
-                .publish(("campaign", "fee_transferred"), (&config.address, fee));
+            withdraw_event_emission::emit_fee_transferred(&env, &config.address, fee);
             total.checked_sub(fee).expect("creator payout underflow")
         } else {
             total
@@ -986,13 +989,13 @@ impl CrowdfundContract {
             description_length,
             socials_length,
         ) {
-            panic!("{}", err);
+            panic!("state size limit exceeded");
         }
 
         // Update title if provided.
         if let Some(new_title) = title {
             if let Err(err) = contract_state_size::validate_title(&new_title) {
-                panic!("{}", err);
+                panic!("state size limit exceeded");
             }
             env.storage().instance().set(&DataKey::Title, &new_title);
             updated_fields.push_back(Symbol::new(&env, "title"));
@@ -1001,7 +1004,7 @@ impl CrowdfundContract {
         // Update description if provided.
         if let Some(new_description) = description {
             if let Err(err) = contract_state_size::validate_description(&new_description) {
-                panic!("{}", err);
+                panic!("state size limit exceeded");
             }
             env.storage()
                 .instance()
@@ -1012,7 +1015,7 @@ impl CrowdfundContract {
         // Update social links if provided.
         if let Some(new_socials) = socials {
             if let Err(err) = contract_state_size::validate_social_links(&new_socials) {
-                panic!("{}", err);
+                panic!("state size limit exceeded");
             }
             env.storage()
                 .instance()
@@ -1054,10 +1057,10 @@ impl CrowdfundContract {
             .get(&DataKey::Roadmap)
             .unwrap_or_else(|| Vec::new(&env));
         if let Err(err) = contract_state_size::validate_roadmap_capacity(roadmap.len()) {
-            panic!("{}", err);
+            panic!("state size limit exceeded");
         }
         if let Err(err) = contract_state_size::validate_roadmap_description(&description) {
-            panic!("{}", err);
+            panic!("state size limit exceeded");
         }
 
         roadmap.push_back(RoadmapItem {
@@ -1100,7 +1103,7 @@ impl CrowdfundContract {
             .get(&DataKey::StretchGoals)
             .unwrap_or_else(|| Vec::new(&env));
         if let Err(err) = contract_state_size::validate_stretch_goal_capacity(stretch_goals.len()) {
-            panic!("{}", err);
+            panic!("state size limit exceeded");
         }
 
         stretch_goals.push_back(milestone);

@@ -177,9 +177,8 @@ fn test_initialize_with_bonus_goal() {
     assert_eq!(client.bonus_goal_progress_bps(), 0);
 }
 
-/// Platform fee exceeding 100% must panic.
+/// Platform fee exceeding 100% must return InvalidPlatformFee.
 #[test]
-#[should_panic(expected = "platform fee cannot exceed 100%")]
 fn test_initialize_platform_fee_over_100_panics() {
     let (env, client, creator, token_address, admin) = setup_env();
     let deadline = env.ledger().timestamp() + 3600;
@@ -187,7 +186,7 @@ fn test_initialize_platform_fee_over_100_panics() {
         address: admin.clone(),
         fee_bps: 10_001,
     };
-    client.initialize(
+    let result = client.try_initialize(
         &admin,
         &creator,
         &token_address,
@@ -199,15 +198,18 @@ fn test_initialize_platform_fee_over_100_panics() {
         &None,
         &None,
     );
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        crate::ContractError::InvalidPlatformFee
+    );
 }
 
-/// Bonus goal not greater than primary goal must panic.
+/// Bonus goal not greater than primary goal must return InvalidBonusGoal.
 #[test]
-#[should_panic(expected = "bonus goal must be greater than primary goal")]
 fn test_initialize_bonus_goal_not_greater_panics() {
     let (env, client, creator, token_address, admin) = setup_env();
     let deadline = env.ledger().timestamp() + 3600;
-    client.initialize(
+    let result = client.try_initialize(
         &admin,
         &creator,
         &token_address,
@@ -218,6 +220,10 @@ fn test_initialize_bonus_goal_not_greater_panics() {
         &Some(500_000i128), // less than goal
         &None,
         &None,
+    );
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        crate::ContractError::InvalidBonusGoal
     );
 }
 
@@ -316,6 +322,7 @@ fn test_withdraw_skips_nft_minting_when_nft_contract_not_set() {
     client.contribute(&contributor, &goal);
 
     env.ledger().set_timestamp(deadline + 1);
+    client.finalize();
 
     let token_client = token::Client::new(&env, &token_address);
     let before = token_client.balance(&creator);
@@ -324,7 +331,7 @@ fn test_withdraw_skips_nft_minting_when_nft_contract_not_set() {
     assert_eq!(client.total_raised(), 0);
 }
 
-/// Withdraw before deadline must return CampaignStillActive.
+/// Withdraw before finalize (deadline not passed) must return CampaignStillActive.
 #[test]
 fn test_withdraw_before_deadline_returns_error() {
     let (env, client, creator, token_address, admin) = setup_env();
@@ -336,15 +343,17 @@ fn test_withdraw_before_deadline_returns_error() {
     mint_to(&env, &token_address, &admin, &contributor, goal);
     client.contribute(&contributor, &goal);
 
-    let result = client.try_withdraw();
+    // finalize() before deadline returns CampaignStillActive
+    let result = client.try_finalize();
     assert_eq!(
         result.unwrap_err().unwrap(),
         crate::ContractError::CampaignStillActive
     );
 }
 
-/// Withdraw when goal not met must return GoalNotReached.
+/// Withdraw when goal not met: finalize transitions to Expired, withdraw panics.
 #[test]
+#[should_panic(expected = "campaign must be in Succeeded state to withdraw")]
 fn test_withdraw_goal_not_reached_returns_error() {
     let (env, client, creator, token_address, admin) = setup_env();
     let deadline = env.ledger().timestamp() + 3600;
@@ -355,11 +364,8 @@ fn test_withdraw_goal_not_reached_returns_error() {
     client.contribute(&contributor, &500_000);
 
     env.ledger().set_timestamp(deadline + 1);
-    let result = client.try_withdraw();
-    assert_eq!(
-        result.unwrap_err().unwrap(),
-        crate::ContractError::GoalNotReached
-    );
+    client.finalize(); // transitions to Expired
+    client.withdraw(); // panics — not Succeeded
 }
 
 /// Withdraw with platform fee deducts fee and sends remainder to creator.
@@ -392,6 +398,7 @@ fn test_withdraw_with_platform_fee() {
     client.contribute(&contributor, &goal);
 
     env.ledger().set_timestamp(deadline + 1);
+    client.finalize();
     client.withdraw();
 
     let token_client = token::Client::new(&env, &token_address);
@@ -422,6 +429,7 @@ fn test_withdraw_mints_nft_for_each_contributor() {
     client.contribute(&bob, &400_000);
 
     env.ledger().set_timestamp(deadline + 1);
+    client.finalize();
     client.withdraw();
 
     // Both contributors should have received an NFT.
@@ -444,13 +452,14 @@ fn test_withdraw_skips_nft_mint_when_contract_not_set() {
 
     env.ledger().set_timestamp(deadline + 1);
     // Should not panic — no NFT contract set.
+    client.finalize();
     client.withdraw();
     assert_eq!(client.nft_contract(), None);
 }
 
-// ── refund ───────────────────────────────────────────────────────────────────
+// ── refund_single (pull-based) ────────────────────────────────────────────────
 
-/// Refund returns tokens to all contributors when goal is not met.
+/// refund_single returns tokens to the contributor when goal is not met.
 #[test]
 fn test_refund_returns_tokens() {
     let (env, client, creator, token_address, admin) = setup_env();
@@ -462,16 +471,17 @@ fn test_refund_returns_tokens() {
     client.contribute(&alice, &500_000);
 
     env.ledger().set_timestamp(deadline + 1);
-    client.refund();
+    client.finalize(); // transitions to Expired
+    client.refund_single(&alice);
 
     let token_client = token::Client::new(&env, &token_address);
     assert_eq!(token_client.balance(&alice), 500_000);
     assert_eq!(client.total_raised(), 0);
 }
 
-/// Second refund call must panic — status is already Refunded.
+/// Second refund_single call must panic — nothing left to refund.
 #[test]
-#[should_panic(expected = "campaign is not active")]
+#[should_panic(expected = "NothingToRefund")]
 fn test_double_refund_panics() {
     let (env, client, creator, token_address, admin) = setup_env();
     let deadline = env.ledger().timestamp() + 3600;
@@ -482,12 +492,14 @@ fn test_double_refund_panics() {
     client.contribute(&alice, &500_000);
 
     env.ledger().set_timestamp(deadline + 1);
-    client.refund();
-    client.refund(); // panics
+    client.finalize();
+    client.refund_single(&alice);
+    client.refund_single(&alice); // panics — nothing left to refund
 }
 
-/// Refund when goal is reached must return GoalReached.
+/// refund_single when goal is reached: finalize transitions to Succeeded, refund panics.
 #[test]
+#[should_panic(expected = "campaign must be in Expired state to refund")]
 fn test_refund_when_goal_reached_returns_error() {
     let (env, client, creator, token_address, admin) = setup_env();
     let deadline = env.ledger().timestamp() + 3600;
@@ -499,11 +511,9 @@ fn test_refund_when_goal_reached_returns_error() {
     client.contribute(&contributor, &goal);
 
     env.ledger().set_timestamp(deadline + 1);
-    let result = client.try_refund();
-    assert_eq!(
-        result.unwrap_err().unwrap(),
-        crate::ContractError::GoalReached
-    );
+    client.finalize(); // transitions to Succeeded
+    client.refund_single(&contributor); // panics — not Expired
+}
 }
 
 // ── cancel ───────────────────────────────────────────────────────────────────
@@ -778,38 +788,15 @@ fn test_add_roadmap_item() {
     assert_eq!(items.get(0).unwrap().date, future_date);
 }
 
-// ── event emission ────────────────────────────────────────────────────────────
+// ── token_decimals ────────────────────────────────────────────────────────────
 
-/// metadata_uri is stored and returned when provided at initialize.
+/// token_decimals() returns the decimal precision stored at initialize time.
 #[test]
-fn test_metadata_uri_stored_on_initialize() {
-    let (env, client, creator, token_address, _admin) = setup_env();
-    let deadline = env.ledger().timestamp() + 3600;
-    let uri = String::from_str(&env, "ipfs://QmExampleHash");
-
-    let admin = creator.clone();
-    client.initialize(
-        &admin,
-        &creator,
-        &token_address,
-        &1_000_000,
-        &deadline,
-        &1_000,
-        &None,
-        &None,
-        &None,
-        &Some(uri.clone()),
-    );
-
-    assert_eq!(client.metadata_uri(), Some(uri));
-}
-
-/// metadata_uri returns None when not provided at initialize.
-#[test]
-fn test_metadata_uri_none_when_not_provided() {
+fn test_token_decimals_stored_on_initialize() {
     let (env, client, creator, token_address, _admin) = setup_env();
     let deadline = env.ledger().timestamp() + 3600;
     default_init(&client, &creator, &token_address, deadline);
 
-    assert_eq!(client.metadata_uri(), None);
+    // Stellar asset contracts report 7 decimals (stroops).
+    assert_eq!(client.token_decimals(), 7u32);
 }

@@ -11,6 +11,10 @@
 #   5. Smoke test initialize call includes required --admin argument.
 #   6. Smoke test WASM build is scoped to -p crowdfund.
 #   7. Smoke test uses stellar-cli, not deprecated soroban-cli.
+#   8. rust_ci.yml job has a timeout-minutes bound.
+#   9. rust_ci.yml WASM build step has a timeout-minutes bound.
+#  10. rust_ci.yml test step has a timeout-minutes bound.
+#  11. rust_ci.yml includes a job elapsed-time logging step.
 #
 # Usage:
 #   bash scripts/github_actions_test.sh

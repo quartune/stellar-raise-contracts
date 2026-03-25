@@ -684,62 +684,6 @@ impl CrowdfundContract {
         Ok(())
     }
 
-    /// Refund all contributors in a single batch transaction.
-    ///
-    /// # Deprecation Notice
-    ///
-    /// **This function is deprecated as of contract v3 and will be removed in a future version.**
-    ///
-    /// Use `refund_single` instead. The pull-based model is preferred because:
-    /// - It avoids unbounded iteration over the contributors list (gas safety).
-    /// - Each contributor controls their own refund timing.
-    /// - It is composable with scripts and automation tooling.
-    ///
-    /// This function remains callable for backward compatibility but may be
-    /// removed in a future upgrade. Scripts and integrations should migrate to
-    /// `refund_single`.
-    #[allow(deprecated)]
-    pub fn refund(env: Env) -> Result<(), ContractError> {
-        let status: Status = env.storage().instance().get(&DataKey::Status).unwrap();
-        if status != Status::Expired {
-            panic!("campaign must be in Expired state to refund");
-        }
-
-        let token_address: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_address);
-
-        let contributors: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Contributors)
-            .unwrap();
-
-        for contributor in contributors.iter() {
-            let contribution_key = DataKey::Contribution(contributor.clone());
-            let amount: i128 = env
-                .storage()
-                .persistent()
-                .get(&contribution_key)
-                .unwrap_or(0);
-            if amount > 0 {
-                refund_single_transfer(
-                    &token_client,
-                    &env.current_contract_address(),
-                    &contributor,
-                    amount,
-                );
-                env.storage().persistent().set(&contribution_key, &0i128);
-                env.storage()
-                    .persistent()
-                    .extend_ttl(&contribution_key, 100, 100);
-            }
-        }
-
-        env.storage().instance().set(&DataKey::TotalRaised, &0i128);
-
-        Ok(())
-    }
-
     /// Claim a refund for a single contributor (pull-based).
     ///
     /// Each contributor independently claims their own refund after the campaign

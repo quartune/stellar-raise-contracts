@@ -50,6 +50,15 @@ pub const MAX_STRETCH_GOALS: u32 = 10;
 /// Maximum byte length of any user-supplied `String` field.
 pub const MAX_STRING_LEN: u32 = 256;
 
+// Additional exported constants for compatibility
+pub const MAX_PLEDGERS: u32 = MAX_CONTRIBUTORS;
+pub const MAX_TITLE_LENGTH: u32 = MAX_STRING_LEN;
+pub const MAX_DESCRIPTION_LENGTH: u32 = MAX_STRING_LEN;
+pub const MAX_ROADMAP_DESCRIPTION_LENGTH: u32 = MAX_STRING_LEN;
+pub const MAX_BONUS_GOAL_DESCRIPTION_LENGTH: u32 = MAX_STRING_LEN;
+pub const MAX_SOCIAL_LINKS_LENGTH: u32 = MAX_STRING_LEN;
+pub const MAX_METADATA_TOTAL_LENGTH: u32 = MAX_STRING_LEN * 4; // Combined metadata
+
 // ── Error ─────────────────────────────────────────────────────────────────────
 
 /// Returned when a state-size limit would be exceeded.
@@ -150,6 +159,93 @@ pub fn check_stretch_goal_limit(env: &Env) -> Result<(), StateSizeError> {
 
     if goals.len() >= MAX_STRETCH_GOALS {
         return Err(StateSizeError::StretchGoalLimitExceeded);
+    }
+    Ok(())
+}
+
+// ── Display implementation for panic messages ──────────────────────────────────
+
+impl core::fmt::Display for StateSizeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            StateSizeError::ContributorLimitExceeded => {
+                write!(f, "MAX_CONTRIBUTORS limit exceeded")
+            }
+            StateSizeError::RoadmapLimitExceeded => write!(f, "MAX_ROADMAP_ITEMS limit exceeded"),
+            StateSizeError::StretchGoalLimitExceeded => write!(f, "MAX_STRETCH_GOALS limit exceeded"),
+            StateSizeError::StringTooLong => write!(f, "MAX_STRING_LEN exceeded"),
+        }
+    }
+}
+
+// ── Compatibility wrapper functions ───────────────────────────────────────────
+
+/// Validates title string length. Alias for check_string_len.
+pub fn validate_title(s: &String) -> Result<(), StateSizeError> {
+    check_string_len(s)
+}
+
+/// Validates description string length. Alias for check_string_len.
+pub fn validate_description(s: &String) -> Result<(), StateSizeError> {
+    check_string_len(s)
+}
+
+/// Validates social links string length. Alias for check_string_len.
+pub fn validate_social_links(s: &String) -> Result<(), StateSizeError> {
+    check_string_len(s)
+}
+
+/// Validates roadmap description string length. Alias for check_string_len.
+pub fn validate_roadmap_description(s: &String) -> Result<(), StateSizeError> {
+    check_string_len(s)
+}
+
+/// Validates bonus goal description string length. Alias for check_string_len.
+pub fn validate_bonus_goal_description(s: &String) -> Result<(), StateSizeError> {
+    check_string_len(s)
+}
+
+/// Validates contributor capacity by checking list length.
+pub fn validate_contributor_capacity(len: u32) -> Result<(), StateSizeError> {
+    if len >= MAX_CONTRIBUTORS {
+        return Err(StateSizeError::ContributorLimitExceeded);
+    }
+    Ok(())
+}
+
+/// Validates pledger capacity by checking list length.
+pub fn validate_pledger_capacity(len: u32) -> Result<(), StateSizeError> {
+    if len >= MAX_CONTRIBUTORS {
+        return Err(StateSizeError::ContributorLimitExceeded);
+    }
+    Ok(())
+}
+
+/// Validates roadmap capacity by checking list length.
+pub fn validate_roadmap_capacity(len: u32) -> Result<(), StateSizeError> {
+    if len >= MAX_ROADMAP_ITEMS {
+        return Err(StateSizeError::RoadmapLimitExceeded);
+    }
+    Ok(())
+}
+
+/// Validates stretch goal capacity by checking list length.
+pub fn validate_stretch_goal_capacity(len: u32) -> Result<(), StateSizeError> {
+    if len >= MAX_STRETCH_GOALS {
+        return Err(StateSizeError::StretchGoalLimitExceeded);
+    }
+    Ok(())
+}
+
+/// Validates metadata total length (sum of all string fields).
+pub fn validate_metadata_total_length(
+    title_len: u32,
+    description_len: u32,
+    socials_len: u32,
+) -> Result<(), StateSizeError> {
+    let total_len = title_len.saturating_add(description_len).saturating_add(socials_len);
+    if total_len > MAX_METADATA_TOTAL_LENGTH {
+        return Err(StateSizeError::StringTooLong);
     }
     Ok(())
 }

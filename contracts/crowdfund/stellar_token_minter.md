@@ -1,338 +1,333 @@
-# stellar_token_minter — Crowdfund Contract
+# stellar_token_minter — Crowdfund Contract Security Module
 
-Technical reference for the Stellar Raise crowdfund smart contract built with Soroban SDK 22.
+Technical reference for the Stellar Raise crowdfund smart contract security module built with Soroban SDK.
 
 ---
 
 ## Overview
 
-The crowdfund contract manages a single campaign lifecycle:
-
-```
-Active → Successful  (goal met, creator withdraws)
-Active → Refunded    (deadline passed, goal not met)
-Active → Cancelled   (creator cancels early)
-```
-
-All token amounts are in the token's smallest unit (stroops for XLM).
+The `stellar_token_minter` module provides secure token minting and pledge collection functionality for the Stellar Raise crowdfunding platform. This module contains validation functions and security checks that are used internally by the crowdfund contract.
 
 ---
 
-## Contract Functions
+## Module Functions
 
-### `initialize`
+### Validation Functions
+
+#### `validate_pledge_preconditions`
 
 ```rust
-fn initialize(
-    env: Env,
-    admin: Address,
-    creator: Address,
-    token: Address,
-    goal: i128,
-    deadline: u64,
+pub fn validate_pledge_preconditions(
+    env: &Env,
+    amount: i128,
     min_contribution: i128,
-    platform_config: Option<PlatformConfig>,
-    bonus_goal: Option<i128>,
-    bonus_goal_description: Option<String>,
 ) -> Result<(), ContractError>
 ```
 
-Creates a new campaign. Can only be called once.
+Validates preconditions for pledge operations.
 
-- `admin` — stored for `upgrade` authorization.
-- `creator` — must sign the transaction (`require_auth`).
-- `platform_config` — optional fee recipient; `fee_bps` must be ≤ 10,000.
-- `bonus_goal` — must be strictly greater than `goal`.
+**Security Checks:**
+1. Campaign must be active (`CampaignNotActive` if not)
+2. Amount must be non-zero (`ZeroAmount` if zero)
+3. Amount must meet minimum (`BelowMinimum` if below)
+4. Current time must be before deadline (`CampaignEnded` if past)
 
-**Errors:** `AlreadyInitialized`  
-**Panics:** platform fee > 100%, bonus goal ≤ primary goal
+**Validation Order:** Status → Amount → Deadline (prevents timing-based attacks)
+
+#### `validate_collect_preconditions`
+
+```rust
+pub fn validate_collect_preconditions(
+    env: &Env,
+) -> Result<(i128, i128, i128), ContractError>
+```
+
+Validates preconditions for collect_pledges operations.
+
+**Returns:** `(goal, total_raised, total_pledged)` on success
+
+**Security Checks:**
+1. Campaign must be active (`CampaignNotActive` if not)
+2. Current time must be after deadline (`CampaignStillActive` if before)
+3. Combined total must meet goal (`GoalNotReached` if below)
+4. No overflow in total calculation (`Overflow` if overflow)
+
+### Arithmetic Helper Functions
+
+#### `calculate_total_commitment`
+
+```rust
+pub fn calculate_total_commitment(
+    total_raised: i128,
+    total_pledged: i128,
+) -> Result<i128, ContractError>
+```
+
+Safely calculates the total commitment (raised + pledged).
+
+- Uses `checked_add` to prevent overflow
+- Returns `ContractError::Overflow` if addition would overflow
+
+#### `safe_add_pledge`
+
+```rust
+pub fn safe_add_pledge(
+    current_total: i128,
+    new_amount: i128,
+) -> Result<i128, ContractError>
+```
+
+Validates that a pledge amount can be safely added to existing totals.
+
+#### `validate_contribution_amount`
+
+```rust
+pub fn validate_contribution_amount(
+    amount: i128,
+    min_contribution: i128,
+) -> Result<(), ContractError>
+```
+
+Validates contribution amounts for security.
+
+- Non-zero amount prevents dust transactions
+- Amount >= minimum prevents spam
+
+#### `safe_calculate_progress`
+
+```rust
+pub fn safe_calculate_progress(
+    current_amount: i128,
+    goal: i128,
+) -> Result<u32, ContractError>
+```
+
+Safely calculates campaign progress in basis points (BPS).
+
+- Returns progress from 0 to 10,000 (where 10,000 = 100%)
+- Caps at 100% to prevent display issues
+- Uses checked arithmetic for overflow protection
+
+### Parameter Validation Functions
+
+#### `validate_deadline`
+
+```rust
+pub fn validate_deadline(
+    env: &Env,
+    deadline: u64,
+) -> Result<(), ContractError>
+```
+
+Validates that a deadline is in the future.
+
+- Returns `CampaignEnded` if deadline is in the past or current
+- Checks against maximum campaign duration (1 year)
+
+#### `validate_goal`
+
+```rust
+pub fn validate_goal(goal: i128) -> Result<(), ContractError>
+```
+
+Validates that a goal amount is reasonable.
+
+- Returns `GoalNotReached` for zero or negative goals
+
+#### `calculate_platform_fee`
+
+```rust
+pub fn calculate_platform_fee(
+    amount: i128,
+    fee_bps: u32,
+) -> Result<i128, ContractError>
+```
+
+Calculates platform fee safely with bounds checking.
+
+- Fee BPS should be 0-10000
+- Uses checked arithmetic
+
+#### `validate_bonus_goal`
+
+```rust
+pub fn validate_bonus_goal(
+    bonus_goal: i128,
+    primary_goal: i128,
+) -> Result<(), ContractError>
+```
+
+Validates bonus goal is strictly greater than primary goal.
+
+- Returns `GoalNotReached` if bonus ≤ primary
 
 ---
 
-### `contribute`
+## Security Features
 
-```rust
-fn contribute(env: Env, contributor: Address, amount: i128) -> Result<(), ContractError>
-```
+### Authorization Enforcement
 
-Transfers `amount` tokens from `contributor` to the contract. Contributor must sign.
+All state-changing operations require proper authentication via Soroban's `require_auth` mechanism.
 
-- Rejects amounts below `min_contribution`.
-- Rejects contributions after `deadline`.
-- Emits `("campaign", "contributed")` event.
-- Fires `("campaign", "bonus_goal_reached")` once when `total_raised` crosses `bonus_goal`.
+### Overflow Protection
 
-**Errors:** `CampaignEnded`, `Overflow`  
-**Panics:** amount below minimum
+All arithmetic operations use `checked_*` methods:
+- `checked_add` for additions
+- `checked_mul` for multiplications
+- `checked_div` for divisions
 
----
+This prevents integer overflow attacks on financial calculations.
 
-### `pledge`
+### State Validation
 
-```rust
-fn pledge(env: Env, pledger: Address, amount: i128) -> Result<(), ContractError>
-```
+Strict validation of campaign state before operations:
+1. Status check occurs first
+2. Input validation follows
+3. Timing checks last
 
-Records a pledge without transferring tokens. Tokens are collected later via `collect_pledges`.
+This order ensures consistent error reporting and prevents state confusion attacks.
 
-**Errors:** `CampaignEnded`
+### Deadline Enforcement
 
----
+Time-based guards use strict inequality comparisons:
+- `timestamp > deadline` for pledge operations (deadline is exclusive)
+- `timestamp <= deadline` for collection operations (must wait until after)
 
-### `collect_pledges`
+### Goal Verification
 
-```rust
-fn collect_pledges(env: Env) -> Result<(), ContractError>
-```
-
-Pulls tokens from all pledgers after the deadline when the combined total meets the goal. Each pledger must have pre-authorized the transfer.
-
-**Errors:** `CampaignStillActive`, `GoalNotReached`
+Ensures pledges are only collected when goals are met:
+- Combined totals are atomically validated
+- Overflow protection on total calculations
+- Strict comparison against goal
 
 ---
 
-### `withdraw`
+## Attack Vectors Mitigated
 
-```rust
-fn withdraw(env: Env) -> Result<(), ContractError>
-```
-
-Creator claims raised funds after deadline when goal is met. If a `PlatformConfig` is set, the fee is deducted first. If an NFT contract is configured, mints one NFT per contributor.
-
-- Sets status to `Successful`.
-- Emits `("campaign", "withdrawn")` and optionally `("campaign", "fee_transferred")`.
-
-**Errors:** `CampaignStillActive`, `GoalNotReached`
-
----
-
-### `refund`
-
-```rust
-fn refund(env: Env) -> Result<(), ContractError>
-```
-
-Returns all contributions when the deadline has passed and the goal was not met. Callable by anyone.
-
-- Sets status to `Refunded`.
-
-**Errors:** `CampaignStillActive`, `GoalReached`
+| Attack Vector | Mitigation |
+|---|---|
+| Integer Overflow | All arithmetic uses `checked_*` operations |
+| Deadline Bypass | Timestamp comparisons use strict inequality |
+| State Confusion | Status checks occur before any modifications |
+| Goal Manipulation | Combined totals atomically validated |
+| Dust Attacks | Zero and minimum amount validation |
+| Reentrancy | Soroban execution model is single-threaded |
+| TOCTOU | Atomic reads of all values before comparison |
 
 ---
 
-### `cancel`
-
-```rust
-fn cancel(env: Env)
-```
-
-Creator cancels the campaign early. Sets status to `Cancelled`. Does not automatically refund contributors — they must be refunded separately.
-
-**Panics:** not active, not authorized
-
----
-
-### `upgrade`
-
-```rust
-fn upgrade(env: Env, new_wasm_hash: BytesN<32>)
-```
-
-Replaces the contract WASM without changing its address or storage. Only the `admin` set at initialization can call this.
-
-**Security note:** Test the new WASM thoroughly before upgrading — it is irreversible.
-
----
-
-### `update_metadata`
-
-```rust
-fn update_metadata(
-    env: Env,
-    creator: Address,
-    title: Option<String>,
-    description: Option<String>,
-    socials: Option<String>,
-)
-```
-
-Updates campaign metadata fields. Only callable by the creator while the campaign is `Active`. Pass `None` to leave a field unchanged.
-
----
-
-### `set_nft_contract`
-
-```rust
-fn set_nft_contract(env: Env, creator: Address, nft_contract: Address)
-```
-
-Configures the NFT contract used for contributor reward minting on successful withdrawal. Only the creator can call this.
-
----
-
-### `add_stretch_goal`
-
-```rust
-fn add_stretch_goal(env: Env, milestone: i128)
-```
-
-Adds a stretch goal milestone. Must be greater than the primary goal. Only the creator can call this.
-
----
-
-### `add_roadmap_item`
-
-```rust
-fn add_roadmap_item(env: Env, date: u64, description: String)
-```
-
-Appends a roadmap item. `date` must be in the future; `description` must be non-empty. Only the creator can call this.
-
----
-
-## View Functions
-
-| Function | Returns | Description |
-|---|---|---|
-| `total_raised` | `i128` | Total tokens contributed so far |
-| `goal` | `i128` | Primary funding goal |
-| `deadline` | `u64` | Campaign end timestamp |
-| `min_contribution` | `i128` | Minimum contribution amount |
-| `contribution(addr)` | `i128` | Contribution by a specific address |
-| `contributors` | `Vec<Address>` | All contributor addresses |
-| `bonus_goal` | `Option<i128>` | Optional bonus goal threshold |
-| `bonus_goal_description` | `Option<String>` | Bonus goal description |
-| `bonus_goal_reached` | `bool` | Whether bonus goal has been met |
-| `bonus_goal_progress_bps` | `u32` | Bonus goal progress in basis points (0–10,000) |
-| `current_milestone` | `i128` | Next unmet stretch goal (0 if none) |
-| `get_stats` | `CampaignStats` | Aggregate stats (see below) |
-| `title` | `String` | Campaign title |
-| `description` | `String` | Campaign description |
-| `socials` | `String` | Social links |
-| `roadmap` | `Vec<RoadmapItem>` | Roadmap items |
-| `token` | `Address` | Token contract address |
-| `nft_contract` | `Option<Address>` | NFT contract address |
-| `version` | `u32` | Contract version (currently 3) |
-
----
-
-## Data Types
-
-### `CampaignStats`
-
-```rust
-pub struct CampaignStats {
-    pub total_raised: i128,
-    pub goal: i128,
-    pub progress_bps: u32,        // 0–10,000 (basis points)
-    pub contributor_count: u32,
-    pub average_contribution: i128,
-    pub largest_contribution: i128,
-}
-```
-
-### `PlatformConfig`
-
-```rust
-pub struct PlatformConfig {
-    pub address: Address,   // fee recipient
-    pub fee_bps: u32,       // fee in basis points (max 10,000 = 100%)
-}
-```
-
-### `RoadmapItem`
-
-```rust
-pub struct RoadmapItem {
-    pub date: u64,
-    pub description: String,
-}
-```
-
-### `ContractError`
+## Error Codes
 
 | Code | Variant | Meaning |
 |---|---|---|
-| 1 | `AlreadyInitialized` | `initialize` called more than once |
+| 1 | `AlreadyInitialized` | Initialize called more than once |
 | 2 | `CampaignEnded` | Action attempted after deadline |
 | 3 | `CampaignStillActive` | Action requires deadline to have passed |
 | 4 | `GoalNotReached` | Withdraw/collect attempted when goal not met |
 | 5 | `GoalReached` | Refund attempted when goal was met |
-
-## Testing and Security Notes
-
-- Test coverage is designed for 95%+ lines in the crowdfund module.
-- Critical code paths covered:
-  - `initialize`: repeated init, platform fee bounds, bonus goal guard.
-  - `contribute`: minimum amount guard, deadline guard, aggregation, overflow protection.
-  - `pledge` / `collect_pledges`: state transition and transfer effect.
-  - `withdraw`: deadline, goal check, platform fee, NFT mint flow.
-  - `refund`, `cancel`, `add_roadmap_item`, `add_stretch_goal`, `current_milestone`, `get_stats`, `bonus_goal`.
-  - `upgrade`: admin-only authorization.
-
-### Security assumptions
-
-1. `creator.require_auth()` and `admin.require_auth()` provide access control in relevant calls.
-2. `platform fee <= 10_000` ensures no more than 100% fees are taken.
-3. `bonus_goal` strict comparison (`> goal`) prevents invalid secondary goal loops.
-4. `contribute` and `collect_pledges` use `checked_add`/`checked_mul` to avoid overflow in numeric operations.
-5. `status` checks in state-transition functions prevent replay / double accounting.
-
-| 6 | `Overflow` | Integer overflow in contribution accounting |
+| 6 | `Overflow` | Integer overflow in calculations |
+| 7 | `NothingToRefund` | Caller has no contribution to refund |
+| 8 | `ZeroAmount` | Amount is zero |
+| 9 | `BelowMinimum` | Amount is below minimum contribution |
+| 10 | `CampaignNotActive` | Campaign is not in active state |
 
 ---
 
-## Security Assumptions
+## Testing
 
-- **Auth enforcement**: `creator.require_auth()` and `contributor.require_auth()` are called on every state-changing function. The Soroban host enforces these at the protocol level.
-- **Overflow protection**: All addition to `total_raised` and per-contributor balances uses `checked_add`, returning `ContractError::Overflow` on failure.
-- **Platform fee cap**: Fee is validated ≤ 10,000 bps (100%) at initialization.
-- **Bonus goal ordering**: Bonus goal must exceed primary goal, preventing nonsensical configurations.
-- **Upgrade access control**: Only the `admin` stored at initialization can call `upgrade`. The admin address is immutable after initialization.
-- **Pull-based refund**: Refunds are pull-based — each contributor calls `refund` (or the creator calls the batch `refund`). This avoids gas exhaustion from large contributor lists in a single transaction.
-- **No reentrancy surface**: Soroban's execution model does not support reentrancy; token transfers are atomic host calls.
+Tests are located in `contracts/crowdfund/src/stellar_token_minter.test.rs`.
 
----
+### Test Categories
 
-## Events
+1. **Authorization Tests**: Verify authentication requirements
+2. **Overflow Protection Tests**: Ensure arithmetic safety
+3. **State Transition Tests**: Validate state machine integrity
+4. **Timing Tests**: Verify deadline enforcement
+5. **Goal Validation Tests**: Ensure goal requirements
+6. **Edge Case Tests**: Cover boundary conditions
+7. **Module Function Tests**: Unit tests for module functions
+8. **Integration Tests**: End-to-end workflow tests
 
-| Topic | Data | Emitted by |
-|---|---|---|
-| `("campaign", "contributed")` | `(contributor, amount)` | `contribute` |
-| `("campaign", "pledged")` | `(pledger, amount)` | `pledge` |
-| `("campaign", "pledges_collected")` | `total_pledged` | `collect_pledges` |
-| `("campaign", "bonus_goal_reached")` | `bonus_goal` | `contribute` (once) |
-| `("campaign", "withdrawn")` | `(creator, total)` | `withdraw` |
-| `("campaign", "fee_transferred")` | `(platform_addr, fee)` | `withdraw` |
-| `("campaign", "nft_minted")` | `(contributor, token_id)` | `withdraw` |
-| `("campaign", "roadmap_item_added")` | `(date, description)` | `add_roadmap_item` |
-| `("metadata_updated", creator)` | `Vec<Symbol>` of updated fields | `update_metadata` |
-
----
-
-## Test Coverage
-
-Tests live in `contracts/crowdfund/src/test.rs` (functional), `contracts/crowdfund/src/auth_tests.rs` (authorization), and `contracts/crowdfund/src/stellar_token_minter_test.rs` (minter-focused edge cases).
-
-| Area | Tests |
-|---|---|
-| initialize | fields stored, double-init error, bonus goal, bad fee, bad bonus goal |
-| contribute | basic, accumulation, after deadline, below minimum, contributors list |
-| withdraw | success, before deadline, goal not met, platform fee, NFT minting, no NFT |
-| refund | returns tokens, double refund panic, goal reached error |
-| cancel | no contributions, non-creator panic, double cancel panic |
-| update_metadata | stores fields, inactive campaign panic |
-| pledge | records amount, after deadline error |
-| collect_pledges | before deadline error, goal not met error |
-| stretch goals | current milestone, no goals |
-| bonus goal | reached after contribution, progress bps capped at 10,000 |
-| get_stats | accurate aggregates, empty campaign |
-| roadmap | add and retrieve items |
-| auth | initialize, withdraw, contribute auth guards |
-| upgrade | admin-only auth guard (non-admin panics) |
-
-Run with:
+### Running Tests
 
 ```bash
-cargo test --package crowdfund
+# Run all stellar_token_minter tests
+cargo test --package crowdfund stellar_token_minter
+
+# Run with detailed output
+cargo test --package crowdfund stellar_token_minter -- --nocapture
+
+# Run specific test
+cargo test --package crowdfund test_pledge_requires_authorization
 ```
+
+### Test Coverage
+
+| Function | Tests |
+|---|---|
+| `calculate_total_commitment` | Success, zero values, overflow detection, boundary values |
+| `safe_add_pledge` | Success, overflow, zero addition, multiple accumulations |
+| `validate_contribution_amount` | Valid, exact minimum, zero, below minimum |
+| `safe_calculate_progress` | Zero goal, exact, halfway, overfunded, small amounts |
+| `validate_deadline` | Future, past, exact current |
+| `validate_goal` | Positive, zero, negative |
+| `calculate_platform_fee` | Zero BPS, 1%, 5%, 100% |
+| `validate_bonus_goal` | Valid, equal to primary, less than primary |
+| `validate_pledge_preconditions` | Success, zero, below minimum, after deadline, inactive |
+| `validate_collect_preconditions` | Before deadline, at deadline, goal not met, success, inactive |
+
+---
+
+## Integration
+
+The module is designed to be used internally by the crowdfund contract:
+
+```rust
+use crate::stellar_token_minter;
+
+fn pledge(env: Env, pledger: Address, amount: i128) -> Result<(), ContractError> {
+    // Use module validation functions
+    stellar_token_minter::validate_pledge_preconditions(
+        &env,
+        amount,
+        min_contribution
+    )?;
+    
+    // ... rest of pledge logic
+}
+```
+
+---
+
+## Security Invariants
+
+The module guarantees:
+
+1. **No Integer Overflow**: All financial calculations are overflow-safe
+2. **Strict Validation Order**: Status → Inputs → Timing
+3. **Atomic Reads**: All values read at once to prevent TOCTOU
+4. **Consistent Error Codes**: Same errors for same failure conditions
+5. **Non-zero Amounts**: Zero transactions are rejected
+6. **Minimum Enforcement**: Amounts below minimum are rejected
+7. **Deadline Strictness**: Deadline comparisons are always exclusive
+
+---
+
+## Changelog
+
+### v2.0.0
+
+- Added comprehensive NatSpec documentation
+- Added `safe_calculate_progress` function
+- Added `validate_deadline` function
+- Added `validate_goal` function
+- Added `calculate_platform_fee` function
+- Added `validate_bonus_goal` function
+- Added extensive unit tests in module
+- Improved test documentation
+
+### v1.0.0
+
+- Initial module structure
+- Core validation functions
+- Basic overflow protection

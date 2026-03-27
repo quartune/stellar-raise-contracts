@@ -221,7 +221,7 @@ impl StellarTokenMinter {
         // Store admin and minter roles
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Minter, &minter);
-        
+
         // Initialize total minted counter to zero
         env.storage().instance().set(&DataKey::TotalMinted, &0u64);
     }
@@ -288,7 +288,8 @@ impl StellarTokenMinter {
             .set(&DataKey::TotalMinted, &(total + 1));
 
         // Interaction: Emit mint event for off-chain tracking
-        env.events().publish((Symbol::new(&env, "mint"), to), token_id);
+        env.events()
+            .publish((Symbol::new(&env, "mint"), to), token_id);
     }
 
     /// Returns the owner of a token, or None if the token has not been minted.
@@ -394,8 +395,6 @@ impl StellarTokenMinter {
         }
 
         // Effect: Update minter role
-        env.storage()
-            .instance()
-            .set(&DataKey::Minter, &new_minter);
+        env.storage().instance().set(&DataKey::Minter, &new_minter);
     }
 }

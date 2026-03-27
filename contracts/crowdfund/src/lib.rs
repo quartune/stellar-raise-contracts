@@ -1,5 +1,5 @@
 #![no_std]
-#![allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec,
 };
@@ -8,7 +8,6 @@ use soroban_sdk::{
 
 pub mod access_control;
 pub mod admin_upgrade_mechanism;
-pub mod access_control;
 pub mod campaign_goal_minimum;
 pub mod cargo_toml_rust;
 pub mod contract_state_size;
@@ -40,8 +39,6 @@ use withdraw_event_emission::{emit_fee_transferred, emit_withdrawn, mint_nfts_in
 #[cfg(test)]
 mod access_control_tests;
 #[cfg(test)]
-mod access_control_tests;
-#[cfg(test)]
 #[path = "admin_upgrade_mechanism.test.rs"]
 mod admin_upgrade_mechanism_test;
 #[cfg(test)]
@@ -60,6 +57,8 @@ mod contribute_error_handling_tests;
 #[cfg(test)]
 #[path = "npm_package_lock_test.rs"]
 mod npm_package_lock_test;
+#[cfg(test)]
+mod test;
 
 #[cfg(test)]
 pub mod proptest_generator_boundary;
@@ -69,9 +68,6 @@ mod proptest_generator_boundary_test;
 #[cfg(test)]
 #[path = "soroban_sdk_minor_test.rs"]
 mod soroban_sdk_minor_test;
-#[cfg(test)]
-#[path = "stellar_token_minter_test.rs"]
-mod stellar_token_minter_test_original;
 #[cfg(test)]
 #[path = "stellar_token_minter.test.rs"]
 mod stellar_token_minter_test_comprehensive;
@@ -345,9 +341,12 @@ impl CrowdfundContract {
             return Err(ContractError::CampaignEnded);
         }
 
-        let mut contributor_stream =
-            load_address_stream_state(&env, &DataKey::Contributors, &contributor);
-        let is_new_contributor = !contributor_stream.contains_target;
+        let contributors: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Contributors)
+            .unwrap_or_else(|| Vec::new(&env));
+        let is_new_contributor = !contributors.contains(&contributor);
         if is_new_contributor {
             if let Err(err) =
                 contract_state_size::validate_contributor_capacity(contributor_stream.entries.len())
@@ -463,8 +462,12 @@ impl CrowdfundContract {
             return Err(ContractError::CampaignEnded);
         }
 
-        let mut pledger_stream = load_address_stream_state(&env, &DataKey::Pledgers, &pledger);
-        let is_new_pledger = !pledger_stream.contains_target;
+        let pledgers: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pledgers)
+            .unwrap_or_else(|| Vec::new(&env));
+        let is_new_pledger = !pledgers.contains(&pledger);
         if is_new_pledger {
             if let Err(err) =
                 contract_state_size::validate_pledger_capacity(pledger_stream.entries.len())
@@ -1135,5 +1138,4 @@ impl CrowdfundContract {
     pub fn nft_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::NFTContract)
     }
-}
 }

@@ -9,8 +9,6 @@
 //! - Overflow protection: `execute_refund_single` uses `checked_sub` on
 //!   `total_raised`; the large-amount test exercises this path.
 
-#![cfg(test)]
-
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token, Address, Env,

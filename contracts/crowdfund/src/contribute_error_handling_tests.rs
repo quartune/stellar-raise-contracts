@@ -235,7 +235,10 @@ fn describe_error_unknown() {
 
 #[test]
 fn describe_error_unknown() {
-    assert_eq!(contribute_error_handling::describe_error(99), "Unknown error");
+    assert_eq!(
+        contribute_error_handling::describe_error(99),
+        "Unknown error"
+    );
 }
 
 #[test]
@@ -254,7 +257,6 @@ fn is_retryable_returns_false_for_all_known_errors() {
 
 // ── logging bounds: error events are emitted ─────────────────────────────────
 
-=======
 // ── happy path ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -420,7 +422,6 @@ fn is_retryable_returns_false_for_all_known_errors() {
 
 // ── logging bounds: error events are emitted ─────────────────────────────────
 
->>>>>>> develop
 /// Returns the last `contribute_error` event as `(variant_symbol, error_code)`.
 fn last_contribute_error_event(env: &Env) -> Option<(Symbol, u32)> {
     let topic0_str = soroban_sdk::String::from_str(env, "contribute_error");

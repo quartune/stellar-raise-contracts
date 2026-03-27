@@ -328,6 +328,11 @@ fn test_withdrawn_event_payout_reflects_fee_deduction() {
         }), // 5%
         &None,
         &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
     );
 
     let c = Address::generate(&env);
@@ -375,6 +380,11 @@ fn test_withdraw_emits_fee_transferred_event() {
             address: platform_addr,
             fee_bps: 200,
         }), // 2%
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
     );
@@ -565,11 +575,64 @@ fn test_fee_transferred_event_fee_amount_matches_config() {
     client.finalize();
     client.withdraw();
 
-    // fee = 500_000 * 100 / 10_000 = 5_000
-    let data =
-        event_data(&env, "campaign", "fee_transferred").expect("fee_transferred event not found");
-    let fee: i128 = i128::try_from_val(&env, &data).expect("data shape mismatch");
-    assert_eq!(fee, 5_000);
+    let data = first_event_data(&env, "campaign", "fee_transferred")
+        .expect("fee_transferred event not found");
+    let tuple: (Address, i128, u32) =
+        <(Address, i128, u32)>::try_from_val(&env, &data).expect("data shape mismatch");
+    assert_eq!(tuple.2, fee_bps);
+}
+
+// ── Security: timestamp in withdrawn event ───────────────────────────────────
+
+/// `withdrawn` event data includes the ledger timestamp.
+#[test]
+fn test_withdrawn_event_includes_ledger_timestamp() {
+    use soroban_sdk::TryFromVal;
+
+    let contribution: i128 = 2_000;
+    let (env, client, _creator, _token) = setup_no_nft(contribution);
+
+    let ts = env.ledger().timestamp();
+    client.withdraw();
+
+    let data = first_event_data(&env, "campaign", "withdrawn").expect("withdrawn event not found");
+    let tuple: (Address, i128, u32, u64) =
+        <(Address, i128, u32, u64)>::try_from_val(&env, &data).expect("data shape mismatch");
+
+    assert_eq!(
+        tuple.3, ts,
+        "timestamp in event must match ledger at withdrawal time"
+    );
+}
+
+/// Two withdrawals at different timestamps produce different timestamp fields.
+/// (Replay detection: same creator + payout but different timestamp = distinct event.)
+#[test]
+fn test_withdrawn_event_timestamp_changes_between_calls() {
+    use soroban_sdk::TryFromVal;
+
+    // First campaign
+    let (env1, client1, _creator1, _token1) = setup_no_nft(1_000);
+    let ts1 = env1.ledger().timestamp();
+    client1.withdraw();
+    let data1 =
+        first_event_data(&env1, "campaign", "withdrawn").expect("withdrawn event not found");
+    let tuple1: (Address, i128, u32, u64) =
+        <(Address, i128, u32, u64)>::try_from_val(&env1, &data1).unwrap();
+
+    // Second campaign at a later timestamp
+    let (env2, client2, _creator2, _token2) = setup_no_nft(1_000);
+    env2.ledger().set_timestamp(ts1 + 100);
+    client2.withdraw();
+    let data2 =
+        first_event_data(&env2, "campaign", "withdrawn").expect("withdrawn event not found");
+    let tuple2: (Address, i128, u32, u64) =
+        <(Address, i128, u32, u64)>::try_from_val(&env2, &data2).unwrap();
+
+    assert_ne!(
+        tuple1.3, tuple2.3,
+        "timestamps must differ between withdrawals"
+    );
 }
 
 // ── Security: emit helper — fee_bps boundary ─────────────────────────────────

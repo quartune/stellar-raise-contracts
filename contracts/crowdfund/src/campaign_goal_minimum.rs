@@ -32,7 +32,8 @@ pub fn create_campaign(env: Env, creator: Address, goal: u64) {
     if goal < MIN_CAMPAIGN_GOAL {
         panic!("Goal too low");
     }
-    env.events().publish(("campaign", "created"), (creator, goal));
+    env.events()
+        .publish(("campaign", "created"), (creator, goal));
 }
 
 /// Minimum seconds a deadline must be ahead of the current ledger timestamp.

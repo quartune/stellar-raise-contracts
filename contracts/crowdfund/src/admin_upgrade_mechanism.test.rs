@@ -1,9 +1,6 @@
 #![cfg(test)]
 use crate::{CrowdfundContract, CrowdfundContractClient};
-use soroban_sdk::{
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
-    Address, BytesN, Env,
-};
+use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +22,13 @@ fn setup() -> (
     let contract_id = env.register(CrowdfundContract, ());
     let client = CrowdfundContractClient::new(&env, &contract_id);
 
+    client.initialize(
+        &admin, &creator, &token, &1000i128, &10000u64, &10i128, &None, &None, &None,
+        &None, // metadata_uri
+    );
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
     let deadline = env.ledger().timestamp() + 3_600;
     client.initialize(
         &admin,
@@ -136,8 +140,21 @@ fn test_upgrade_requires_auth() {
 #[test]
 #[ignore = "requires wasm-opt: run `cargo build --target wasm32-unknown-unknown --release` first"]
 fn test_admin_can_upgrade_with_valid_wasm() {
-    // This test requires a pre-built WASM binary. Run:
-    //   cargo build --target wasm32-unknown-unknown --release -p crowdfund
-    // then re-run with --ignored to execute.
-    let (_env, _contract_id, _client, _admin, _creator, _token) = setup();
+    mod crowdfund_wasm {
+        soroban_sdk::contractimport!(
+            file = "../../target/wasm32-unknown-unknown/release/crowdfund.wasm"
+        );
+    }
+
+    // Initialize with mock_all_auths so initialize() succeeds
+    env.mock_all_auths();
+    client.initialize(
+        &admin, &creator, &token, &1000i128, &10000u64, &10i128, &None, &None, &None,
+        &None, // metadata_uri
+    );
+
+    // Clear auths — upgrade() must fail without admin auth
+    env.set_auths(&[]);
+    let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+    client.upgrade(&new_wasm_hash);
 }

@@ -28,7 +28,7 @@
 //! 5. **Audit trail** — All changes are tracked and verifiable
 
 #[allow(dead_code, missing_docs)]
-use soroban_sdk::{contract, contractimpl, contracttype, Env, Map, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String, Symbol, Vec};
 
 // ── Contract Types for Dependency Management ─────────────────────────────────────
 
@@ -546,67 +546,60 @@ impl CargoTomlRust {
                 continue;
             }
 
-            let check_type_version = soroban_sdk::String::from_str(&env, "version");
-            let check_type_security = soroban_sdk::String::from_str(&env, "security");
-            let check_type_audit = soroban_sdk::String::from_str(&env, "audit");
+            let (passed, message) = match rule.check_type.to_string().as_str() {
+                "version" => {
+                    let outdated_count = approved_deps
+                        .iter()
+                        .filter(|dep| {
+                            !env.storage()
+                                .instance()
+                                .get(&DataKey::DependencyVersions)
+                                .unwrap_or_else(|| Map::new(&env))
+                                .get(dep.name.clone())
+                                .map_or(false, |latest| latest == dep.version)
+                        })
+                        .count();
 
-            let (passed, message) = if rule.check_type == check_type_version {
-                let outdated_count = approved_deps
-                    .iter()
-                    .filter(|dep| {
-                        !env.storage()
-                            .instance()
-                            .get::<_, Map<String, String>>(&DataKey::DependencyVersions)
-                            .unwrap_or_else(|| Map::new(&env))
-                            .get(dep.name.clone())
-                            .map_or(false, |latest: String| latest == dep.version)
-                    })
-                    .count();
+                    (
+                        outdated_count == 0,
+                        if outdated_count == 0 {
+                            "All dependencies are up to date".to_string()
+                        } else {
+                            format!("{} dependencies are out of date", outdated_count)
+                        },
+                    )
+                }
+                "security" => {
+                    let high_risk_count = approved_deps
+                        .iter()
+                        .filter(|dep| dep.security_level > policy.max_security_level)
+                        .count();
 
-                (
-                    outdated_count == 0,
-                    if outdated_count == 0 {
-                        soroban_sdk::String::from_str(&env, "All dependencies are up to date")
-                    } else {
-                        soroban_sdk::String::from_str(&env, "Some dependencies are out of date")
-                    },
-                )
-            } else if rule.check_type == check_type_security {
-                let high_risk_count = approved_deps
-                    .iter()
-                    .filter(|dep| dep.security_level > policy.max_security_level)
-                    .count();
+                    (
+                        high_risk_count == 0,
+                        if high_risk_count == 0 {
+                            "All dependencies meet security requirements".to_string()
+                        } else {
+                            format!(
+                                "{} dependencies exceed maximum security level",
+                                high_risk_count
+                            )
+                        },
+                    )
+                }
+                "audit" => {
+                    let unapproved_count = approved_deps.iter().filter(|dep| !dep.approved).count();
 
-                (
-                    high_risk_count == 0,
-                    if high_risk_count == 0 {
-                        soroban_sdk::String::from_str(
-                            &env,
-                            "All dependencies meet security requirements",
-                        )
-                    } else {
-                        soroban_sdk::String::from_str(
-                            &env,
-                            "dependencies exceed maximum security level",
-                        )
-                    },
-                )
-            } else if rule.check_type == check_type_audit {
-                let unapproved_count = approved_deps.iter().filter(|dep| !dep.approved).count();
-
-                (
-                    unapproved_count == 0,
-                    if unapproved_count == 0 {
-                        soroban_sdk::String::from_str(&env, "All dependencies are approved")
-                    } else {
-                        soroban_sdk::String::from_str(&env, "Some dependencies require approval")
-                    },
-                )
-            } else {
-                (
-                    false,
-                    soroban_sdk::String::from_str(&env, "Unknown rule type"),
-                )
+                    (
+                        unapproved_count == 0,
+                        if unapproved_count == 0 {
+                            "All dependencies are approved".to_string()
+                        } else {
+                            format!("{} dependencies require approval", unapproved_count)
+                        },
+                    )
+                }
+                _ => (false, "Unknown rule type".to_string()),
             };
 
             results.push_back((rule.rule_name.clone(), passed, message));

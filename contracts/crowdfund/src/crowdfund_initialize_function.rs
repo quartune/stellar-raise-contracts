@@ -200,9 +200,11 @@ pub fn validate_bonus_goal(bonus_goal: Option<i128>, goal: i128) -> Result<(), C
 /// Validates the optional bonus goal description.
 #[inline]
 pub fn validate_bonus_goal_description(description: &Option<String>) -> Result<(), ContractError> {
-    // Description is optional; if present, accept any non-empty value.
-    // Length validation is handled by Soroban's storage limits.
-    let _ = description;
+    if let Some(desc) = description {
+        if let Err(err) = contract_state_size::validate_bonus_goal_description(desc) {
+            return Err(ContractError::InvalidBonusGoalDescription);
+        }
+    }
     Ok(())
 }
 

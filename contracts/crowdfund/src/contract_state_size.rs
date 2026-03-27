@@ -10,7 +10,7 @@
 //!
 //! All byte constants are measured in UTF-8 bytes; count constants are item counts.
 
-use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, String, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, Address, Env, String, Vec};
 
 use crate::{DataKey, RoadmapItem};
 
@@ -220,9 +220,17 @@ pub fn validate_bonus_goal_description(desc: &String) -> Result<(), StateSizeErr
 /// @param title_len        Length of the title string in bytes.
 /// @param description_len  Length of the description string in bytes.
 /// @param socials_len      Length of the social links string in bytes.
-pub fn validate_metadata_total_length(title_len: u32, description_len: u32, socials_len: u32) -> Result<(), StateSizeError> {
+pub fn validate_metadata_total_length(
+    title_len: u32,
+    description_len: u32,
+    socials_len: u32,
+) -> Result<(), StateSizeError> {
     const AGGREGATE_LIMIT: u32 = MAX_TITLE_LENGTH + MAX_DESCRIPTION_LENGTH + MAX_STRING_LEN;
-    if title_len.saturating_add(description_len).saturating_add(socials_len) > AGGREGATE_LIMIT {
+    if title_len
+        .saturating_add(description_len)
+        .saturating_add(socials_len)
+        > AGGREGATE_LIMIT
+    {
         Err(StateSizeError::StringTooLong)
     } else {
         Ok(())
@@ -239,17 +247,30 @@ pub struct ContractStateSize;
 #[contractimpl]
 impl ContractStateSize {
     /// Returns `MAX_TITLE_LENGTH`.
-    pub fn max_title_length(_env: Env) -> u32 { MAX_TITLE_LENGTH }
+    pub fn max_title_length(_env: Env) -> u32 {
+        MAX_TITLE_LENGTH
+    }
     /// Returns `MAX_DESCRIPTION_LENGTH`.
-    pub fn max_description_length(_env: Env) -> u32 { MAX_DESCRIPTION_LENGTH }
+    pub fn max_description_length(_env: Env) -> u32 {
+        MAX_DESCRIPTION_LENGTH
+    }
     /// Returns `MAX_STRING_LEN` (social links limit).
-    pub fn max_social_links_length(_env: Env) -> u32 { MAX_STRING_LEN }
+    pub fn max_social_links_length(_env: Env) -> u32 {
+        MAX_STRING_LEN
+    }
     /// Returns `MAX_CONTRIBUTORS`.
-    pub fn max_contributors(_env: Env) -> u32 { MAX_CONTRIBUTORS }
+    pub fn max_contributors(_env: Env) -> u32 {
+        MAX_CONTRIBUTORS
+    }
     /// Returns `MAX_ROADMAP_ITEMS`.
-    pub fn max_roadmap_items(_env: Env) -> u32 { MAX_ROADMAP_ITEMS }
+    pub fn max_roadmap_items(_env: Env) -> u32 {
+        MAX_ROADMAP_ITEMS
+    }
     /// Returns `MAX_STRETCH_GOALS`.
-    pub fn max_stretch_goals(_env: Env) -> u32 { MAX_STRETCH_GOALS }
+    pub fn max_stretch_goals(_env: Env) -> u32 {
+        MAX_STRETCH_GOALS
+    }
+}
 
     /// Returns `true` if `title` length is within `MAX_TITLE_LENGTH`.
     pub fn validate_title(_env: Env, title: String) -> bool {
@@ -265,139 +286,19 @@ impl ContractStateSize {
     }
 }
 
-// ── Standalone helpers (called from lib.rs) ───────────────────────────────────
+/// Legacy constant for backwards compatibility (MAX_STRING_LEN = MAX_DESCRIPTION_LENGTH)
+pub const MAX_STRING_LEN: u32 = MAX_DESCRIPTION_LENGTH;
 
-/// Returns `Ok(())` if `count < MAX_CONTRIBUTORS`, else `Err("limit exceeded")`.
-#[inline]
-pub fn validate_contributor_capacity(count: u32) -> Result<(), &'static str> {
-    if count >= MAX_CONTRIBUTORS {
-        Err("contributor limit exceeded")
-    } else {
-        Ok(())
+/// Legacy function for backwards compatibility.
+/// Checks that a string does not exceed MAX_DESCRIPTION_LENGTH bytes.
+///
+/// @param s The string to validate.
+/// @return Ok(()) when within limits, Err otherwise.
+pub fn check_string_len(s: &String) -> Result<(), StateSizeError> {
+    if s.len() > MAX_STRING_LEN {
+        return Err(StateSizeError::StringTooLong);
     }
-}
-
-/// Panics if the contributor list is at capacity.
-#[inline]
-pub fn check_contributor_limit(env: &soroban_sdk::Env) -> Result<(), &'static str> {
-    use soroban_sdk::Vec;
-    let count: u32 = env
-        .storage()
-        .persistent()
-        .get::<_, Vec<soroban_sdk::Address>>(&crate::DataKey::Contributors)
-        .map(|v| v.len())
-        .unwrap_or(0);
-    validate_contributor_capacity(count)
-}
-
-/// Returns `Ok(())` if `count < MAX_CONTRIBUTORS`, else `Err("limit exceeded")`.
-#[inline]
-pub fn validate_pledger_capacity(count: u32) -> Result<(), &'static str> {
-    if count >= MAX_CONTRIBUTORS {
-        Err("pledger limit exceeded")
-    } else {
-        Ok(())
-    }
-}
-
-/// Panics if the pledger list is at capacity.
-#[inline]
-pub fn check_pledger_limit(env: &soroban_sdk::Env) -> Result<(), &'static str> {
-    use soroban_sdk::Vec;
-    let count: u32 = env
-        .storage()
-        .persistent()
-        .get::<_, Vec<soroban_sdk::Address>>(&crate::DataKey::Pledgers)
-        .map(|v| v.len())
-        .unwrap_or(0);
-    validate_pledger_capacity(count)
-}
-
-/// Validates total metadata length.
-#[inline]
-pub fn validate_metadata_total_length(total_len: u32) -> Result<(), &'static str> {
-    const AGGREGATE_LIMIT: u32 =
-        MAX_TITLE_LENGTH + MAX_DESCRIPTION_LENGTH + MAX_SOCIAL_LINKS_LENGTH;
-    if total_len > AGGREGATE_LIMIT {
-        Err("metadata too long")
-    } else {
-        Ok(())
-    }
-}
-
-/// Validates a title string length.
-#[inline]
-pub fn validate_title(title: &soroban_sdk::String) -> Result<(), &'static str> {
-    if title.len() > MAX_TITLE_LENGTH {
-        Err("title too long")
-    } else {
-        Ok(())
-    }
-}
-
-/// Validates a description string length.
-#[inline]
-pub fn validate_description(desc: &soroban_sdk::String) -> Result<(), &'static str> {
-    if desc.len() > MAX_DESCRIPTION_LENGTH {
-        Err("description too long")
-    } else {
-        Ok(())
-    }
-}
-
-/// Validates social links string length.
-#[inline]
-pub fn validate_social_links(links: &soroban_sdk::String) -> Result<(), &'static str> {
-    if links.len() > MAX_SOCIAL_LINKS_LENGTH {
-        Err("social links too long")
-    } else {
-        Ok(())
-    }
-}
-
-/// Validates a generic string length (uses description limit).
-#[inline]
-pub fn check_string_len(s: &soroban_sdk::String) -> Result<(), &'static str> {
-    validate_description(s)
-}
-
-/// Validates roadmap item capacity.
-#[inline]
-pub fn validate_roadmap_capacity(count: u32) -> Result<(), &'static str> {
-    if count >= MAX_ROADMAP_ITEMS {
-        Err("roadmap limit exceeded")
-    } else {
-        Ok(())
-    }
-}
-
-/// Checks roadmap limit from storage.
-#[inline]
-pub fn check_roadmap_limit(env: &soroban_sdk::Env) -> Result<(), &'static str> {
-    use soroban_sdk::Vec;
-    let count: u32 = env
-        .storage()
-        .persistent()
-        .get::<_, Vec<crate::RoadmapItem>>(&crate::DataKey::Roadmap)
-        .map(|v| v.len())
-        .unwrap_or(0);
-    validate_roadmap_capacity(count)
-}
-
-/// Validates a roadmap item description length.
-#[inline]
-pub fn validate_roadmap_description(desc: &soroban_sdk::String) -> Result<(), &'static str> {
-    validate_description(desc)
-}
-
-/// Validates stretch goal capacity.
-#[inline]
-pub fn validate_stretch_goal_capacity(count: u32) -> Result<(), &'static str> {
-    if count >= MAX_STRETCH_GOALS {
-        Err("stretch goal limit exceeded")
-    } else {
-        Ok(())
-    }
+    Ok(())
 }
 
 /// Checks stretch goal limit from storage.

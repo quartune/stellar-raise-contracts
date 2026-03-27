@@ -7,13 +7,13 @@
 //! - Audit trail maintains complete dependency history
 //! - Dev-only dependencies are properly isolated from production
 
-#![cfg(test)]
-
+#[allow(deprecated)]
 use crate::cargo_toml_rust::{
     all_deprecated_versions_replaced, audited_dependencies, CargoTomlRust, ComplianceRule, DataKey,
-    DepRecord, SecurityPolicy, PROPTEST_VERSION, SOROBAN_SDK_VERSION,
+    DepRecord, DependencyInfo, SecurityPolicy, PROPTEST_VERSION, PROPTEST_VERSION_DEPRECATED,
+    SOROBAN_SDK_VERSION, SOROBAN_SDK_VERSION_DEPRECATED,
 };
-use soroban_sdk::{Env, String, Vec};
+use soroban_sdk::{Env, Map, String, Vec};
 
 // ── Version constant stability ────────────────────────────────────────────────
 
@@ -499,15 +499,9 @@ fn run_compliance_check_security_failure() {
         .unwrap();
 
     assert!(!security_result.1);
-    // Check that the message contains the expected substring by comparing with known string
-    let expected_msg =
-        soroban_sdk::String::from_str(&env, "dependencies exceed maximum security level");
-    assert!(
-        security_result.2 == expected_msg || {
-            // Accept any non-empty failure message
-            security_result.2.len() > 0
-        }
-    );
+    assert!(security_result
+        .2
+        .contains("dependencies exceed maximum security level"));
 }
 
 #[test]
